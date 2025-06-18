@@ -19,9 +19,7 @@ RUN python3 -c "\
 from huggingface_hub import snapshot_download; \
 snapshot_download( \
     'OpenGVLab/InternVL3-14B', \
-    cache_dir='/workspace/models', \
-    local_dir='/workspace/models/InternVL3-14B', \
-    local_dir_use_symlinks=False \
+    local_dir='/workspace/models/InternVL3-14B' \
 )"
 
 # Copy handler

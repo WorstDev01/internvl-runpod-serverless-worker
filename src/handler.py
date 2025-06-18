@@ -97,12 +97,12 @@ def process_batch_requests(batch_data):
                     # Combine text parts
                     combined_text = " ".join(text_parts)
 
-                    # Create vLLM input format
+                    # Create vLLM input format - FIXED: Use proper structure
                     if images:
-                        # For vision models, use the proper format
+                        # For vision models, create proper input structure
                         vllm_input = {
-                            "prompt": f"<image>\n{combined_text}",  # InternVL expects this format
-                            "multi_modal_data": {"image": images[0]}  # Single image for now
+                            "prompt": combined_text,
+                            "multi_modal_data": {"image": images[0]}  # Keep the image data separate
                         }
                         vllm_inputs.append(vllm_input)
                     else:
@@ -166,57 +166,39 @@ def handler(job):
 
         sampling_params = create_sampling_params(batch_requests)
 
-        # Separate multimodal and text-only inputs
-        text_only_prompts = []
-        multimodal_inputs = []
-        input_mapping = []  # Track which original input each corresponds to
-
-        for i, inp in enumerate(vllm_inputs):
-            if "multi_modal_data" in inp:
-                multimodal_inputs.append(inp)
-                input_mapping.append(("multimodal", len(multimodal_inputs) - 1, i))
-            else:
-                text_only_prompts.append(inp["prompt"])
-                input_mapping.append(("text", len(text_only_prompts) - 1, i))
-
-        # Generate responses
+        # FIXED: Process all requests together with proper multimodal handling
         print(f"Generating responses...")
-        all_outputs = [None] * len(vllm_inputs)
 
-        # Process text-only requests
-        if text_only_prompts:
-            print(f"Processing {len(text_only_prompts)} text-only requests")
-            text_outputs = llm.generate(text_only_prompts, sampling_params)
+        # Prepare inputs for vLLM
+        prompts = []
+        multi_modal_data_list = []
 
-        # Process multimodal requests
-        if multimodal_inputs:
-            print(f"Processing {len(multimodal_inputs)} multimodal requests")
-            mm_prompts = [inp["prompt"] for inp in multimodal_inputs]
-            mm_data = [inp["multi_modal_data"] for inp in multimodal_inputs]
-            mm_outputs = llm.generate(mm_prompts, sampling_params, multi_modal_data=mm_data)
+        for inp in vllm_inputs:
+            prompts.append(inp["prompt"])
+            if "multi_modal_data" in inp:
+                multi_modal_data_list.append(inp["multi_modal_data"])
+            else:
+                multi_modal_data_list.append(None)
 
-        # Reconstruct results in original order
-        text_idx = 0
-        mm_idx = 0
-
-        for input_type, type_idx, original_idx in input_mapping:
-            if input_type == "text":
-                all_outputs[original_idx] = text_outputs[text_idx]
-                text_idx += 1
-            else:  # multimodal
-                all_outputs[original_idx] = mm_outputs[mm_idx]
-                mm_idx += 1
+        # Generate responses - FIXED: Pass multi_modal_data as a list
+        if any(mmd is not None for mmd in multi_modal_data_list):
+            # At least one multimodal request
+            print("Processing batch with multimodal data")
+            outputs = llm.generate(prompts, sampling_params, multi_modal_data=multi_modal_data_list)
+        else:
+            # All text-only requests
+            print("Processing text-only batch")
+            outputs = llm.generate(prompts, sampling_params)
 
         # Format results
         results = []
-        for i, output in enumerate(all_outputs):
-            if output is not None:
-                result = {
-                    "index": i,
-                    "text": output.outputs[0].text,
-                    "finish_reason": output.outputs[0].finish_reason
-                }
-                results.append(result)
+        for i, output in enumerate(outputs):
+            result = {
+                "index": i,
+                "text": output.outputs[0].text,
+                "finish_reason": output.outputs[0].finish_reason
+            }
+            results.append(result)
 
         print(f"Successfully generated {len(results)} results")
         return {"results": results}
