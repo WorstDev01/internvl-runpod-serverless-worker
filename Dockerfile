@@ -1,6 +1,6 @@
 # Clone model
 FROM alpine/git:2.47.2 AS clone
-COPY builder/clone.sh /clone.sh
+COPY clone.sh /clone.sh
 RUN . /clone.sh /workspace/models/InternVL3-14B https://huggingface.co/OpenGVLab/InternVL3-14B main
 
 # Build final image
