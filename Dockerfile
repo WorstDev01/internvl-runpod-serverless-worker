@@ -1,4 +1,5 @@
 FROM nvidia/cuda:12.4.1-base-ubuntu22.04
+
 ENV DEBIAN_FRONTEND=noninteractive \
     TORCHDYNAMO_DISABLE=1 \
     PIP_PREFER_BINARY=1 \
@@ -14,13 +15,13 @@ RUN pip install --upgrade pip && \
     pip install vllm runpod pillow huggingface-hub
 
 # Download model using huggingface-hub (more efficient than git)
-RUN python3 -c "
-from huggingface_hub import snapshot_download
-snapshot_download(
-    'OpenGVLab/InternVL3-14B',
-    cache_dir='/workspace/models',
-    local_dir='/workspace/models/InternVL3-14B',
-    local_dir_use_symlinks=False
+RUN python3 -c "\
+from huggingface_hub import snapshot_download; \
+snapshot_download( \
+    'OpenGVLab/InternVL3-14B', \
+    cache_dir='/workspace/models', \
+    local_dir='/workspace/models/InternVL3-14B', \
+    local_dir_use_symlinks=False \
 )"
 
 # Copy handler
