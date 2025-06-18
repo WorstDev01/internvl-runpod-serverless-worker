@@ -24,16 +24,25 @@ def initialize_llm(input_data):
         for key, value in os.environ.items():
             if key.startswith("VLLM_"):
                 param_name = key.replace("VLLM_", "").lower()
+
+                # Convert boolean strings
+                if value.lower() == "true":
+                    engine_args[param_name] = True
+                elif value.lower() == "false":
+                    engine_args[param_name] = False
                 # Special handling for JSON values
-                if param_name == "limit_mm_per_prompt":
+                elif param_name == "limit_mm_per_prompt":
                     import json
                     try:
                         engine_args[param_name] = json.loads(value)
+                        print(f"Parsed {param_name}: {engine_args[param_name]}")
                     except json.JSONDecodeError:
                         print(f"Warning: Could not parse {key} as JSON: {value}")
                         engine_args[param_name] = value
                 else:
                     engine_args[param_name] = value
+
+        print(f"Final engine args: {engine_args}")
 
         # Override with input args if provided
         if "engine_args" in input_data:
@@ -94,20 +103,25 @@ def process_batch_requests(batch_data):
                             else:
                                 print(f"Unsupported image URL format: {url}")
 
-                    # Combine text parts
-                    combined_text = " ".join(text_parts)
+                    # Combine text parts and add image token for InternVL
+                    if images and text_parts:
+                        # For InternVL, we need to add <image> token
+                        combined_text = "<image>\n" + " ".join(text_parts)
+                    else:
+                        combined_text = " ".join(text_parts)
 
-                    # Create vLLM input format - FIXED: Use proper structure
+                    # Create vLLM input format
                     if images:
-                        # For vision models, create proper input structure
+                        # For vision models, vLLM expects a dict with prompt and multi_modal_data
                         vllm_input = {
                             "prompt": combined_text,
-                            "multi_modal_data": {"image": images[0]}  # Keep the image data separate
+                            "multi_modal_data": {"image": images[0]}  # vLLM expects image in this format
                         }
-                        vllm_inputs.append(vllm_input)
                     else:
                         # Text-only request
-                        vllm_inputs.append({"prompt": combined_text})
+                        vllm_input = {"prompt": combined_text}
+
+                    vllm_inputs.append(vllm_input)
 
                 else:
                     # Simple text content
@@ -162,33 +176,16 @@ def handler(job):
             if "multi_modal_data" in inp:
                 print(f"Input {i}: Multimodal - {inp['prompt'][:50]}...")
             else:
-                print(f"Input {i}: Text only - {inp['prompt'][:50]}...")
+                print(f"Input {i}: Text only - {inp.get('prompt', '')[:50]}...")
 
         sampling_params = create_sampling_params(batch_requests)
 
-        # FIXED: Process all requests together with proper multimodal handling
+        # Generate responses
         print(f"Generating responses...")
 
-        # Prepare inputs for vLLM
-        prompts = []
-        multi_modal_data_list = []
-
-        for inp in vllm_inputs:
-            prompts.append(inp["prompt"])
-            if "multi_modal_data" in inp:
-                multi_modal_data_list.append(inp["multi_modal_data"])
-            else:
-                multi_modal_data_list.append(None)
-
-        # Generate responses - FIXED: Pass multi_modal_data as a list
-        if any(mmd is not None for mmd in multi_modal_data_list):
-            # At least one multimodal request
-            print("Processing batch with multimodal data")
-            outputs = llm.generate(prompts, sampling_params, multi_modal_data=multi_modal_data_list)
-        else:
-            # All text-only requests
-            print("Processing text-only batch")
-            outputs = llm.generate(prompts, sampling_params)
+        # In vLLM, when you have multimodal inputs, you pass them as a list of dicts
+        # Each dict contains 'prompt' and optionally 'multi_modal_data'
+        outputs = llm.generate(vllm_inputs, sampling_params)
 
         # Format results
         results = []
