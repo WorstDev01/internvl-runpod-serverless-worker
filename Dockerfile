@@ -1,9 +1,3 @@
-# Clone model
-FROM alpine/git:2.47.2 AS clone
-COPY clone.sh /clone.sh
-RUN . /clone.sh /workspace/models/InternVL3-14B https://huggingface.co/OpenGVLab/InternVL3-14B main
-
-# Build final image
 FROM nvidia/cuda:12.4.1-base-ubuntu22.04
 ENV DEBIAN_FRONTEND=noninteractive \
     TORCHDYNAMO_DISABLE=1 \
@@ -17,10 +11,17 @@ RUN apt-get update && \
 
 # Install Python dependencies
 RUN pip install --upgrade pip && \
-    pip install vllm runpod pillow
+    pip install vllm runpod pillow huggingface-hub
 
-# Copy model from clone stage
-COPY --from=clone /workspace/models /workspace/models
+# Download model using huggingface-hub (more efficient than git)
+RUN python3 -c "
+from huggingface_hub import snapshot_download
+snapshot_download(
+    'OpenGVLab/InternVL3-14B',
+    cache_dir='/workspace/models',
+    local_dir='/workspace/models/InternVL3-14B',
+    local_dir_use_symlinks=False
+)"
 
 # Copy handler
 WORKDIR /src
