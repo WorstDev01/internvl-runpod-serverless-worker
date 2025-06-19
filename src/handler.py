@@ -88,22 +88,24 @@ def decode_base64_image(base64_string):
 
 
 def process_batch_requests(batch_data):
-    """Convert batch requests to vLLM format with proper multimodal handling"""
-    vllm_inputs = []
+    """Convert batch requests to proper format for InternVL3"""
+    processed_inputs = []
 
     for request in batch_data:
         if "messages" in request:
             # Handle chat format with multimodal support
             messages = request["messages"]
 
+            # Process each message to extract text and images
+            text_parts = []
+            images = []
+
             for message in messages:
+                role = message.get("role", "")
                 content = message.get("content", "")
 
                 if isinstance(content, list):
                     # Handle multimodal content
-                    text_parts = []
-                    images = []
-
                     for item in content:
                         if item.get("type") == "text":
                             text_parts.append(item["text"])
@@ -118,61 +120,72 @@ def process_batch_requests(batch_data):
                                 if image:
                                     images.append(image)
                             elif url.startswith(("http://", "https://")):
-                                # Handle HTTP/HTTPS URLs - download at full quality
+                                # Handle HTTP/HTTPS URLs
                                 image = download_image_from_url(url)
                                 if image:
                                     images.append(image)
                             else:
                                 print(f"Unsupported image URL format: {url}")
-
-                    # Combine text parts and add image token for InternVL
-                    if images and text_parts:
-                        # For InternVL, we need to add <image> token
-                        combined_text = "<image>\n" + " ".join(text_parts)
-                    else:
-                        combined_text = " ".join(text_parts)
-
-                    # Create vLLM input format
-                    if images:
-                        # For vision models, vLLM expects a dict with prompt and multi_modal_data
-                        vllm_input = {
-                            "prompt": combined_text,
-                            "multi_modal_data": {"image": images[0]}  # vLLM expects image in this format
-                        }
-                        print(f"Created multimodal input with image size: {images[0].size}")
-                    else:
-                        # Text-only request
-                        vllm_input = {"prompt": combined_text}
-
-                    vllm_inputs.append(vllm_input)
-
                 else:
                     # Simple text content
-                    vllm_inputs.append({"prompt": content})
+                    text_parts.append(str(content))
+
+            # Combine text parts
+            combined_text = " ".join(text_parts)
+
+            # For InternVL3, if there are images, add <image> token
+            if images:
+                # InternVL3 expects <image> token at the beginning
+                final_prompt = f"<image>\n{combined_text}"
+                processed_inputs.append({
+                    "prompt": final_prompt,
+                    "multi_modal_data": {"image": images[0]}  # Use first image
+                })
+                print(f"Created multimodal input with image size: {images[0].size}")
+            else:
+                # Text-only request
+                processed_inputs.append({"prompt": combined_text})
 
         elif "prompt" in request:
             # Handle simple prompt format
-            vllm_inputs.append({"prompt": str(request["prompt"])})
+            processed_inputs.append({"prompt": str(request["prompt"])})
+        else:
+            # Fallback
+            processed_inputs.append({"prompt": str(request)})
 
-    return vllm_inputs
+    return processed_inputs
 
 
 def create_sampling_params(batch_data):
-    """Create sampling parameters from first request"""
+    """Create sampling parameters from first request - only use provided params"""
     first_request = batch_data[0] if batch_data else {}
 
-    params = {
-        "max_tokens": first_request.get("max_tokens", 1024),
-        "temperature": first_request.get("temperature", 0.7),
-        "top_p": first_request.get("top_p", 1.0),
-    }
+    # Only include parameters that are explicitly provided
+    params = {}
 
-    return SamplingParams(**params)
+    if "max_tokens" in first_request:
+        params["max_tokens"] = first_request["max_tokens"]
+    if "temperature" in first_request:
+        params["temperature"] = first_request["temperature"]
+    if "top_p" in first_request:
+        params["top_p"] = first_request["top_p"]
+    if "top_k" in first_request:
+        params["top_k"] = first_request["top_k"]
+    if "repetition_penalty" in first_request:
+        params["repetition_penalty"] = first_request["repetition_penalty"]
+    if "stop" in first_request:
+        params["stop"] = first_request["stop"]
+
+    print(f"Sampling params (only provided): {params}")  # Debug print
+
+    return SamplingParams(**params) if params else SamplingParams()
 
 
 def handler(job):
     try:
         input_data = job["input"]
+
+        print(f"Received input data: {input_data}")  # Debug print
 
         # Initialize LLM
         initialize_llm(input_data)
@@ -190,33 +203,41 @@ def handler(job):
         if not batch_requests:
             return {"error": "Batch requests list is empty"}
 
+        print(f"Processing {len(batch_requests)} batch requests")
+
         # Process requests
-        vllm_inputs = process_batch_requests(batch_requests)
+        processed_inputs = process_batch_requests(batch_requests)
 
         # Debug: Print processed inputs
-        print(f"Processed {len(vllm_inputs)} inputs")
-        for i, inp in enumerate(vllm_inputs):
+        print(f"Processed {len(processed_inputs)} inputs")
+        for i, inp in enumerate(processed_inputs):
             if "multi_modal_data" in inp:
-                print(f"Input {i}: Multimodal - {inp['prompt'][:50]}...")
+                print(f"Input {i}: Multimodal - {inp['prompt'][:100]}...")
             else:
-                print(f"Input {i}: Text only - {inp.get('prompt', '')[:50]}...")
+                print(f"Input {i}: Text only - {inp.get('prompt', '')[:100]}...")
 
+        # Create sampling parameters
         sampling_params = create_sampling_params(batch_requests)
 
         # Generate responses
-        print(f"Generating responses...")
+        print(f"Generating responses with sampling params: {sampling_params}")
 
-        # In vLLM, when you have multimodal inputs, you pass them as a list of dicts
-        # Each dict contains 'prompt' and optionally 'multi_modal_data'
-        outputs = llm.generate(vllm_inputs, sampling_params)
+        # For InternVL3, we pass the processed inputs directly
+        outputs = llm.generate(processed_inputs, sampling_params)
 
         # Format results
         results = []
         for i, output in enumerate(outputs):
+            generated_text = output.outputs[0].text
+            print(f"Generated text {i}: '{generated_text}'")  # Debug print
+
             result = {
                 "index": i,
-                "text": output.outputs[0].text,
-                "finish_reason": output.outputs[0].finish_reason
+                "text": generated_text,
+                "finish_reason": output.outputs[0].finish_reason,
+                "prompt_tokens": len(output.prompt_token_ids) if hasattr(output, 'prompt_token_ids') else None,
+                "completion_tokens": len(output.outputs[0].token_ids) if hasattr(output.outputs[0],
+                                                                                 'token_ids') else None
             }
             results.append(result)
 
