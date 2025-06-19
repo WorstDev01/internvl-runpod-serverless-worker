@@ -6,7 +6,7 @@ import requests
 from vllm import LLM, SamplingParams
 from PIL import Image
 import io
-print(f"vLLM version: {vllm.__version__}")
+
 # Global variables
 llm = None
 
