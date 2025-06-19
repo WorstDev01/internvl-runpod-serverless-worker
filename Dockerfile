@@ -25,10 +25,4 @@ snapshot_download( \
 WORKDIR /src
 COPY src/handler.py .
 
-# Set default environment variables
-ENV VLLM_MODEL=/workspace/models/InternVL3-14B \
-    VLLM_TRUST_REMOTE_CODE=true \
-    VLLM_MAX_MODEL_LEN=8192 \
-    VLLM_LIMIT_MM_PER_PROMPT="{\"image\": 1, \"video\": 0}"
-
 CMD ["python3", "handler.py"]

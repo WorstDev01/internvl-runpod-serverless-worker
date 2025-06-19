@@ -18,36 +18,22 @@ def initialize_llm(input_data):
         print("Initializing VLLM...")
         start_time = time.time()
 
-        # Get engine args from environment or input
-        engine_args = {}
+        # Hardcoded VLLM engine arguments for InternVL3-14B
+        engine_args = {
+            "model": "/workspace/models/InternVL3-14B",   # !! Falls ich was ändere in Dockefile, hier auch ändern !!!
+            "trust_remote_code": True,
+            "max_model_len": 8192,
+            "limit_mm_per_prompt": {"image": 1, "video": 0},
+            "enforce_eager": False,  # Enable batching optimizations
+            "max_num_seqs": 32,      # Allow more concurrent sequences
+        }
 
-        # Load from environment variables
-        for key, value in os.environ.items():
-            if key.startswith("VLLM_"):
-                param_name = key.replace("VLLM_", "").lower()
+        print(f"Hardcoded engine args: {engine_args}")
 
-                # Convert boolean strings
-                if value.lower() == "true":
-                    engine_args[param_name] = True
-                elif value.lower() == "false":
-                    engine_args[param_name] = False
-                # Special handling for JSON values
-                elif param_name == "limit_mm_per_prompt":
-                    import json
-                    try:
-                        engine_args[param_name] = json.loads(value)
-                        print(f"Parsed {param_name}: {engine_args[param_name]}")
-                    except json.JSONDecodeError:
-                        print(f"Warning: Could not parse {key} as JSON: {value}")
-                        engine_args[param_name] = value
-                else:
-                    engine_args[param_name] = value
-
-        print(f"Final engine args: {engine_args}")
-
-        # Override with input args if provided
+        # Override with input args if provided (optional)
         if "engine_args" in input_data:
             engine_args.update(input_data["engine_args"])
+            print(f"Updated engine args: {engine_args}")
 
         llm = LLM(**engine_args)
         print('─' * 20,
