@@ -1,7 +1,6 @@
 FROM nvidia/cuda:12.4.1-base-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
-    TORCHDYNAMO_DISABLE=1 \
     PIP_PREFER_BINARY=1 \
     PYTHONUNBUFFERED=1
 
