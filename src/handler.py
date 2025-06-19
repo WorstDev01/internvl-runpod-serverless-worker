@@ -2,6 +2,7 @@ import os
 import time
 import base64
 import runpod
+import requests
 from vllm import LLM, SamplingParams
 from PIL import Image
 import io
@@ -54,6 +55,22 @@ def initialize_llm(input_data):
               '─' * 20, "*Unfortunately, this time is being billed.", sep=os.linesep)
 
 
+def download_image_from_url(url):
+    """Download image from URL and return PIL Image at full quality"""
+    try:
+        print(f"Downloading image from URL: {url}")
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+
+        # Create PIL Image directly from response content without any compression
+        image = Image.open(io.BytesIO(response.content))
+        print(f"Downloaded image size: {image.size}, mode: {image.mode}")
+        return image
+    except Exception as e:
+        print(f"Error downloading image from URL {url}: {e}")
+        return None
+
+
 def decode_base64_image(base64_string):
     """Decode base64 image string to PIL Image"""
     try:
@@ -100,6 +117,11 @@ def process_batch_requests(batch_data):
                                 image = decode_base64_image(url)
                                 if image:
                                     images.append(image)
+                            elif url.startswith(("http://", "https://")):
+                                # Handle HTTP/HTTPS URLs - download at full quality
+                                image = download_image_from_url(url)
+                                if image:
+                                    images.append(image)
                             else:
                                 print(f"Unsupported image URL format: {url}")
 
@@ -117,6 +139,7 @@ def process_batch_requests(batch_data):
                             "prompt": combined_text,
                             "multi_modal_data": {"image": images[0]}  # vLLM expects image in this format
                         }
+                        print(f"Created multimodal input with image size: {images[0].size}")
                     else:
                         # Text-only request
                         vllm_input = {"prompt": combined_text}
