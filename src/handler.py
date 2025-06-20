@@ -26,8 +26,6 @@ def initialize_lmdeploy(input_data):
         # LMDeploy backend configuration (adjusted for smaller model)
         backend_config = TurbomindEngineConfig(
             session_len=8192,
-            tp=1,  # Tensor parallelism (1 for single GPU)
-            cache_max_entry_count=0.8,  # KV cache usage
         )
 
         # Chat template configuration for InternVL3
