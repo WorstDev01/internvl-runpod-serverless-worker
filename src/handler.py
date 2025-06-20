@@ -3,8 +3,6 @@ import time
 import base64
 import runpod
 import requests
-from PIL import Image
-import io
 
 # LMDeploy imports
 from lmdeploy import pipeline, TurbomindEngineConfig, GenerationConfig, ChatTemplateConfig
@@ -22,12 +20,11 @@ def initialize_lmdeploy(input_data):
         print("Initializing LMDeploy...")
         start_time = time.time()
 
-        # Hardcoded LMDeploy configuration for InternVL3-14B
         model_path = "/workspace/models/InternVL3-14B"
 
-        # LMDeploy backend configuration
+        # LMDeploy backend configuration (adjusted for smaller model)
         backend_config = TurbomindEngineConfig(
-            session_len=8192,  # Context length
+            session_len=8192,
             tp=1,  # Tensor parallelism (1 for single GPU)
             cache_max_entry_count=0.8,  # KV cache usage
         )
@@ -167,12 +164,10 @@ def create_generation_config(batch_data):
     """Create LMDeploy generation configuration from first request"""
     first_request = batch_data[0] if batch_data else {}
 
-    # Default generation config
+    # Default generation config (adjusted for smaller 1B model)
     config_params = {
-        "max_new_tokens": 1024,
-        "temperature": 0.8,
-        "top_p": 0.8,
-        "top_k": 40,
+        "max_new_tokens": 512,  # Reduced for 1B model
+        "temperature": 0.1,
     }
 
     # Override with provided parameters
