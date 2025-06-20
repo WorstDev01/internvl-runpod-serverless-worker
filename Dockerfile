@@ -9,9 +9,10 @@ RUN apt-get update && \
     apt-get install -y python3-pip && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies - Added timm and other vision dependencies
+# Install Python dependencies - Added torch for GPU memory monitoring
 RUN pip install --upgrade pip && \
-    pip install lmdeploy>=0.7.3 runpod pillow huggingface-hub timm transformers torch torchvision
+    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124 && \
+    pip install lmdeploy>=0.7.3 runpod pillow huggingface-hub timm transformers
 
 # Download model using huggingface-hub (more efficient than git)
 RUN python3 -c "\
