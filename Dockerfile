@@ -11,7 +11,7 @@ RUN apt-get update && \
 
 # Install Python dependencies
 RUN pip install --upgrade pip && \
-    pip install vllm runpod pillow huggingface-hub
+    pip install lmdeploy>=0.7.3 runpod pillow huggingface-hub
 
 # Download model using huggingface-hub (more efficient than git)
 RUN python3 -c "\
@@ -20,6 +20,9 @@ snapshot_download( \
     'OpenGVLab/InternVL3-14B', \
     local_dir='/workspace/models/InternVL3-14B' \
 )"
+
+# Create temp directory for images
+RUN mkdir -p /tmp
 
 # Copy handler
 WORKDIR /src

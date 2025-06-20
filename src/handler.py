@@ -3,54 +3,70 @@ import time
 import base64
 import runpod
 import requests
-from vllm import LLM, SamplingParams
 from PIL import Image
 import io
 
+# LMDeploy imports
+from lmdeploy import pipeline, TurbomindEngineConfig, GenerationConfig, ChatTemplateConfig
+from lmdeploy.vl import load_image
+from lmdeploy.vl.constants import IMAGE_TOKEN
+
 # Global variables
-llm = None
+pipe = None
 
 
-def initialize_llm(input_data):
-    global llm
+def initialize_lmdeploy(input_data):
+    global pipe
 
-    if not llm:
-        print("Initializing VLLM...")
+    if not pipe:
+        print("Initializing LMDeploy...")
         start_time = time.time()
 
-        # Hardcoded VLLM engine arguments for InternVL3-14B
-        engine_args = {
-            "model": "/workspace/models/InternVL3-14B",   # !! Falls ich was ändere in Dockefile, hier auch ändern !!!
-            "trust_remote_code": True,
-            "max_model_len": 8192,
-            "limit_mm_per_prompt": {"image": 1, "video": 0},
-            "enforce_eager": False,  # Enable batching optimizations
-            "max_num_seqs": 32,      # Allow more concurrent sequences
-        }
+        # Hardcoded LMDeploy configuration for InternVL3-14B
+        model_path = "/workspace/models/InternVL3-14B"
 
-        print(f"Hardcoded engine args: {engine_args}")
+        # LMDeploy backend configuration
+        backend_config = TurbomindEngineConfig(
+            session_len=8192,  # Context length
+            tp=1,  # Tensor parallelism (1 for single GPU)
+            cache_max_entry_count=0.8,  # KV cache usage
+        )
 
-        # Override with input args if provided (optional)
-        if "engine_args" in input_data:
-            engine_args.update(input_data["engine_args"])
-            print(f"Updated engine args: {engine_args}")
+        # Chat template configuration for InternVL3
+        chat_template_config = ChatTemplateConfig(
+            model_name='internvl2_5'  # InternVL3 uses internvl2_5 template
+        )
 
-        llm = LLM(**engine_args)
+        print(f"Model path: {model_path}")
+        print(f"Backend config: session_len={backend_config.session_len}, tp={backend_config.tp}")
+
+        # Initialize LMDeploy pipeline
+        pipe = pipeline(
+            model_path,
+            backend_config=backend_config,
+            chat_template_config=chat_template_config
+        )
+
         print('─' * 20,
-              "--- VLLM engine and model cold start initialization took %s seconds ---" % (time.time() - start_time),
+              f"--- LMDeploy initialization took {time.time() - start_time:.2f} seconds ---",
               '─' * 20, "*Unfortunately, this time is being billed.", sep=os.linesep)
 
 
 def download_image_from_url(url):
-    """Download image from URL and return PIL Image at full quality"""
+    """Download image from URL and return PIL Image"""
     try:
         print(f"Downloading image from URL: {url}")
         response = requests.get(url, timeout=30)
         response.raise_for_status()
 
-        # Create PIL Image directly from response content without any compression
-        image = Image.open(io.BytesIO(response.content))
-        print(f"Downloaded image size: {image.size}, mode: {image.mode}")
+        # Save to temporary file for LMDeploy
+        temp_path = f"/tmp/image_{hash(url)}.jpg"
+        with open(temp_path, 'wb') as f:
+            f.write(response.content)
+
+        # Load with LMDeploy's load_image function
+        image = load_image(temp_path)
+        print(f"Downloaded and loaded image from: {url}")
         return image
     except Exception as e:
         print(f"Error downloading image from URL {url}: {e}")
@@ -58,7 +74,7 @@ def download_image_from_url(url):
 
 
 def decode_base64_image(base64_string):
-    """Decode base64 image string to PIL Image"""
+    """Decode base64 image string and save for LMDeploy"""
     try:
         # Remove data URL prefix if present
         if base64_string.startswith('data:'):
@@ -66,7 +82,15 @@ def decode_base64_image(base64_string):
 
         # Decode base64
         image_data = base64.b64decode(base64_string)
-        image = Image.open(io.BytesIO(image_data))
+
+        # Save to temporary file for LMDeploy
+        temp_path = f"/tmp/image_{hash(base64_string[:100])}.jpg"
+        with open(temp_path, 'wb') as f:
+            f.write(image_data)
+
+        # Load with LMDeploy's load_image function
+        image = load_image(temp_path)
+        print(f"Decoded and loaded base64 image")
         return image
     except Exception as e:
         print(f"Error decoding base64 image: {e}")
@@ -74,8 +98,8 @@ def decode_base64_image(base64_string):
 
 
 def process_batch_requests(batch_data):
-    """Convert batch requests to proper format for InternVL3"""
-    processed_inputs = []
+    """Convert batch requests to LMDeploy format"""
+    processed_prompts = []
 
     for request in batch_data:
         if "messages" in request:
@@ -119,62 +143,60 @@ def process_batch_requests(batch_data):
             # Combine text parts
             combined_text = " ".join(text_parts)
 
-            # For InternVL3, if there are images, add <image> token
+            # For LMDeploy, create prompt with images
             if images:
-                # InternVL3 expects <image> token at the beginning
-                final_prompt = f"<image>\n{combined_text}"
-                processed_inputs.append({
-                    "prompt": final_prompt,
-                    "multi_modal_data": {"image": images[0]}  # Use first image
-                })
-                print(f"Created multimodal input with image size: {images[0].size}")
+                # Use first image (LMDeploy format)
+                prompt_tuple = (combined_text, images[0])
+                processed_prompts.append(prompt_tuple)
+                print(f"Created multimodal prompt with image")
             else:
                 # Text-only request
-                processed_inputs.append({"prompt": combined_text})
+                processed_prompts.append(combined_text)
 
         elif "prompt" in request:
             # Handle simple prompt format
-            processed_inputs.append({"prompt": str(request["prompt"])})
+            processed_prompts.append(str(request["prompt"]))
         else:
             # Fallback
-            processed_inputs.append({"prompt": str(request)})
+            processed_prompts.append(str(request))
 
-    return processed_inputs
+    return processed_prompts
 
 
-def create_sampling_params(batch_data):
-    """Create sampling parameters from first request - only use provided params"""
+def create_generation_config(batch_data):
+    """Create LMDeploy generation configuration from first request"""
     first_request = batch_data[0] if batch_data else {}
 
-    # Only include parameters that are explicitly provided
-    params = {}
+    # Default generation config
+    config_params = {
+        "max_new_tokens": 1024,
+        "temperature": 0.8,
+        "top_p": 0.8,
+        "top_k": 40,
+    }
 
+    # Override with provided parameters
     if "max_tokens" in first_request:
-        params["max_tokens"] = first_request["max_tokens"]
+        config_params["max_new_tokens"] = first_request["max_tokens"]
     if "temperature" in first_request:
-        params["temperature"] = first_request["temperature"]
+        config_params["temperature"] = first_request["temperature"]
     if "top_p" in first_request:
-        params["top_p"] = first_request["top_p"]
+        config_params["top_p"] = first_request["top_p"]
     if "top_k" in first_request:
-        params["top_k"] = first_request["top_k"]
-    if "repetition_penalty" in first_request:
-        params["repetition_penalty"] = first_request["repetition_penalty"]
-    if "stop" in first_request:
-        params["stop"] = first_request["stop"]
+        config_params["top_k"] = first_request["top_k"]
 
-    print(f"Sampling params (only provided): {params}")  # Debug print
+    print(f"Generation config: {config_params}")
 
-    return SamplingParams(**params) if params else SamplingParams()
+    return GenerationConfig(**config_params)
 
 
 def handler(job):
     try:
         input_data = job["input"]
+        print(f"Received input data: {input_data}")
 
-        print(f"Received input data: {input_data}")  # Debug print
-
-        # Initialize LLM
-        initialize_llm(input_data)
+        # Initialize LMDeploy
+        initialize_lmdeploy(input_data)
 
         # Handle prewarm
         if "prewarm" in input_data:
@@ -189,49 +211,59 @@ def handler(job):
         if not batch_requests:
             return {"error": "Batch requests list is empty"}
 
-        print(f"Processing {len(batch_requests)} batch requests")
+        print(f"Processing {len(batch_requests)} batch requests with LMDeploy")
 
-        # Process requests
-        processed_inputs = process_batch_requests(batch_requests)
+        # Process requests into LMDeploy format
+        processed_prompts = process_batch_requests(batch_requests)
 
-        # Debug: Print processed inputs
-        print(f"Processed {len(processed_inputs)} inputs")
-        for i, inp in enumerate(processed_inputs):
-            if "multi_modal_data" in inp:
-                print(f"Input {i}: Multimodal - {inp['prompt'][:100]}...")
+        print(f"Processed {len(processed_prompts)} prompts for LMDeploy")
+        for i, prompt in enumerate(processed_prompts):
+            if isinstance(prompt, tuple):
+                print(f"Prompt {i}: Multimodal - {prompt[0][:100]}...")
             else:
-                print(f"Input {i}: Text only - {inp.get('prompt', '')[:100]}...")
+                print(f"Prompt {i}: Text only - {str(prompt)[:100]}...")
 
-        # Create sampling parameters
-        sampling_params = create_sampling_params(batch_requests)
+        # Create generation configuration
+        gen_config = create_generation_config(batch_requests)
 
-        # Generate responses
-        print(f"Generating responses with sampling params: {sampling_params}")
+        # Generate responses using LMDeploy batch inference
+        print(f"Generating responses with LMDeploy batch inference...")
+        start_time = time.time()
 
-        # For InternVL3, we pass the processed inputs directly
-        outputs = llm.generate(processed_inputs, sampling_params)
+        # LMDeploy batch inference
+        responses = pipe(processed_prompts, gen_config=gen_config)
+
+        generation_time = time.time() - start_time
+        print(f"LMDeploy batch generation completed in {generation_time:.2f} seconds")
 
         # Format results
         results = []
-        for i, output in enumerate(outputs):
-            generated_text = output.outputs[0].text
-            print(f"Generated text {i}: '{generated_text}'")  # Debug print
+        for i, response in enumerate(responses):
+            # LMDeploy response format
+            if hasattr(response, 'text'):
+                generated_text = response.text
+            else:
+                generated_text = str(response)
+
+            print(f"Generated text {i}: '{generated_text[:100]}...'")
 
             result = {
                 "index": i,
                 "text": generated_text,
-                "finish_reason": output.outputs[0].finish_reason,
-                "prompt_tokens": len(output.prompt_token_ids) if hasattr(output, 'prompt_token_ids') else None,
-                "completion_tokens": len(output.outputs[0].token_ids) if hasattr(output.outputs[0],
-                                                                                 'token_ids') else None
+                "finish_reason": "stop",  # LMDeploy doesn't provide detailed finish reasons
+                "prompt_tokens": None,  # Would need to calculate separately
+                "completion_tokens": None  # Would need to calculate separately
             }
             results.append(result)
 
-        print(f"Successfully generated {len(results)} results")
+        print(f"Successfully generated {len(results)} results with LMDeploy")
+        print(f"Average time per request: {generation_time / len(results):.4f} seconds")
+        print(f"Requests per second: {len(results) / generation_time:.2f}")
+
         return {"results": results}
 
     except Exception as e:
-        print(f"Error in handler: {str(e)}")
+        print(f"Error in LMDeploy handler: {str(e)}")
         import traceback
         traceback.print_exc()
         return {"error": str(e)}
