@@ -10,6 +10,7 @@ import psutil
 import gc
 import requests
 from io import BytesIO
+import base64
 
 # Global model variables
 model = None
@@ -70,11 +71,21 @@ def build_transform(input_size=448):
 
 
 def load_image_from_url(url):
-    """Load image from URL"""
+    """Load image from URL or base64 data URL"""
     try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        return Image.open(BytesIO(response.content)).convert('RGB')
+        if url.startswith('data:image/'):
+            # Handle base64 data URLs
+            header, data = url.split(',', 1)
+            image_data = base64.b64decode(data)
+            return Image.open(BytesIO(image_data)).convert('RGB')
+        else:
+            # Handle regular URLs
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (compatible; RunPod-VLM/1.0)'
+            }
+            response = requests.get(url, timeout=10, headers=headers)
+            response.raise_for_status()
+            return Image.open(BytesIO(response.content)).convert('RGB')
     except Exception as e:
         print(f"Error loading image from {url}: {e}")
         return None
@@ -114,7 +125,7 @@ def initialize_model():
     if model is None:
         log_memory_usage("BEFORE MODEL LOAD")
 
-        model_path = 'OpenGVLab/InternVL3-1B'  # Or use your local path
+        model_path = '/workspace/models/InternVL3-1B'  # Use local downloaded model
 
         print(f"Loading model from {model_path}...")
         model = AutoModel.from_pretrained(

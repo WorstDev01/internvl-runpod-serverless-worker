@@ -17,7 +17,8 @@ RUN pip install --upgrade pip && \
     pip install runpod psutil && \
     pip install huggingface-hub timm && \
     pip install sentencepiece protobuf && \
-    pip install einops
+    pip install einops && \
+    pip install accelerate
 
 # Download model using huggingface-hub
 # Change this to match your model - using InternVL3-1B as in the handler
