@@ -125,7 +125,7 @@ def initialize_model():
     if model is None:
         log_memory_usage("BEFORE MODEL LOAD")
 
-        model_path = '/workspace/models/InternVL3-1B'  # Use local downloaded model
+        model_path = '/workspace/models/InternVL3-14B'  # Use local downloaded model
 
         print(f"Loading model from {model_path}...")
         model = AutoModel.from_pretrained(

@@ -21,12 +21,12 @@ RUN pip install --upgrade pip && \
     pip install accelerate
 
 # Download model using huggingface-hub
-# Change this to match your model - using InternVL3-1B as in the handler
+# Change this to match your model - using InternVL3-14B as in the handler
 RUN python3 -c "\
 from huggingface_hub import snapshot_download; \
 snapshot_download( \
-    'OpenGVLab/InternVL3-1B', \
-    local_dir='/workspace/models/InternVL3-1B' \
+    'OpenGVLab/InternVL3-14B', \
+    local_dir='/workspace/models/InternVL3-14B' \
 )"
 
 # Create temp directory for images
